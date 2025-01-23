@@ -62,7 +62,7 @@ def enviar_mensagens(contatos, mensagem_template):
         mensagem = mensagem_template.format(nome=nome, vencimento=vencimento)
 
         # Gerar link do WhatsApp
-        url = f"https://wa.me/{telefone_formatado}?text={quote(mensagem)}"
+        url = f"https://web.whatsapp.com/send?phone={telefone_formatado}&text={quote(mensagem)}"
         print(f"Abrindo link: {url}")
 
         try:
