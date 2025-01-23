@@ -1,10 +1,6 @@
 import time
+import webbrowser
 from openpyxl import load_workbook
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from urllib.parse import quote
 
 """
@@ -12,7 +8,7 @@ Função para carregar a planilha e extrair os dados
 """
 def carregar_planilha(caminho_arquivo, pagina):
     planilha = load_workbook(caminho_arquivo)
-    
+
     # Verificar se a aba existe
     if pagina not in planilha.sheetnames:
         raise ValueError(f"A aba '{pagina}' não existe. As abas disponíveis são: {', '.join(planilha.sheetnames)}")
@@ -38,61 +34,53 @@ def carregar_planilha(caminho_arquivo, pagina):
     return contatos
 
 
-"""
-Função para configurar o WebDriver
-Inicializa o Selenium e abre o WhatsApp Web no Chrome.
-"""
-def configurar_driver():
-    driver = webdriver.Chrome()
-    driver.get("https://web.whatsapp.com")
-
-    print("Escaneie o código QR code.")
-    time.sleep(30)
-    return driver
+def formatar_telefone(telefone):
+    """
+    Remove espaços, parênteses, traços e verifica se o telefone tem o formato esperado.
+    """
+    telefone = str(telefone)
+    telefone = telefone.replace("(", "").replace(")", "").replace("-", "").replace(" ", "")
+    if not telefone.startswith("55"):  # Adicione o código do país se necessário
+        telefone = f"55{telefone}"
+    return telefone
 
 
-""" 
-Função para enviar mensagens
-"""
-
-
-def enviar_mensagens(driver, contatos, mensagem_template):
+def enviar_mensagens(contatos, mensagem_template):
     for contato in contatos:
-        mensagem = mensagem_template.format(**contato)
-        telefone = str(contato['telefone'])
+        nome = contato.get('nome', 'Desconhecido')
+        telefone = contato.get('telefone')
+        vencimento = contato.get('vencimento', 'Data de vencimento não especificada')
 
-        # Gerar links do WhatsApp
-        url = f"https://wa.me/{telefone}?text={quote(mensagem)}"
-        driver.get(url)
-        time.sleep(5)
+        # Validar telefone
+        if not telefone or telefone == 'None':
+            print(f"Erro: Telefone inválido para {nome}. Pulando este contato.")
+            continue
+
+        telefone_formatado = formatar_telefone(telefone)
+
+        # Gerar mensagem personalizada
+        mensagem = mensagem_template.format(nome=nome, vencimento=vencimento)
+
+        # Gerar link do WhatsApp
+        url = f"https://wa.me/{telefone_formatado}?text={quote(mensagem)}"
+        print(f"Abrindo link: {url}")
 
         try:
-            # Esperar até que o campo de mensagem esteja disponível
-            campo_mensagem = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, '//div[@title="Mensagem"]'))
-            )
-            campo_mensagem.send_keys(Keys.ENTER)
-            print(f"Mensagem enviada para {contato['nome']} ({telefone}).")
+            webbrowser.open(url)
+            print(f"Mensagem gerada para {nome} ({telefone_formatado}).")
+            time.sleep(10)  # Aguarde para evitar problemas com múltiplas aberturas
         except Exception as e:
-            print(f"Erro ao enviar mensagem para {contato['nome']} ({telefone}): {e}")
+            print(f"Erro ao abrir link para {nome} ({telefone_formatado}): {e}")
+
 """
 Main
 """
 if __name__ == "__main__":
-    print("Digite o caminho do arquivo.")
-    print(r"(ex: C:\Users\seu-usuario\Desktop\contatos.xlsx)")
-    caminho_do_arquivo = input("\n")
+    # Informações fixas para facilitar o teste
+    caminho_do_arquivo = "contatos.xlsx"
+    pagina = "Planilha1"
+    mensagem_template = "Olá {nome}, sua fatura vence em {vencimento}. Por favor, efetue o pagamento."
 
-    print("Especifique a página da planilha onde estão os contatos.")
-    print("ex: Pagina1 ou Sheet1")
-    pagina = input("\n")
-
-    mensagem_template = input("Digite a mensagem com placeholders ({nome}, {vencimento}): ")
-
+    # Carregar contatos e enviar mensagens
     contatos = carregar_planilha(caminho_do_arquivo, pagina)
-    driver = configurar_driver()
-
-    try:
-        enviar_mensagens(driver, contatos, mensagem_template)
-    finally:
-        driver.quit()
+    enviar_mensagens(contatos, mensagem_template)
