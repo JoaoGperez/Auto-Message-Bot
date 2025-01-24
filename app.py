@@ -1,86 +1,105 @@
 import time
-import webbrowser
-from openpyxl import load_workbook
-from urllib.parse import quote
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
-"""
-Função para carregar a planilha e extrair os dados
-"""
+# Carregar planilha e ler dados.
 def carregar_planilha(caminho_arquivo, pagina):
-    planilha = load_workbook(caminho_arquivo)
-
-    # Verificar se a aba existe
-    if pagina not in planilha.sheetnames:
-        raise ValueError(f"A aba '{pagina}' não existe. As abas disponíveis são: {', '.join(planilha.sheetnames)}")
-
-    pagina_clientes = planilha[pagina]
-    contatos = []
-
-    for linha in pagina_clientes.iter_rows(min_row=2):
-        nome = linha[0].value
-        telefone = linha[1].value
-        vencimento = linha[2].value
-
-        vencimento_formatado = (
-            vencimento.strftime('%d/%m/%Y') if vencimento else "Data de vencimento não especificada."
-        )
-
-        contatos.append({
-            "nome": nome,
-            "telefone": telefone,
-            "vencimento": vencimento_formatado
-        })
-
-    return contatos
+    try:
+        dados = pd.read_excel(caminho_arquivo, sheet_name=pagina)
+        print(dados.columns)  # Imprime os nomes das colunas para verificação
+        return dados[['Nome', 'Telefone']]  # Ajuste para os nomes corretos
+    except Exception as e:
+        print(f"Erro ao carregar planilha: {e}")
+        return None
 
 
-def formatar_telefone(telefone):
+# Configurar e inicializar o Selenium WebDriver.
+def iniciar_webdriver(caminho_driver):
+    options = Options()
+    options.add_argument("--start-maximized")
+
+    service = Service(caminho_driver)
+
+    driver = webdriver.Chrome(service=service, options=options)
+    return driver
+
+# Função para logar no WhatsApp Web
+def logar_whatsapp(driver):
+    driver.get("https://web.whatsapp.com")
+    print("Escaneie o QR Code para fazer Login.")
+    time.sleep(30)
+
+# Localizar contato ou número.
+def localizar_contato(driver, numero):
     """
-    Remove espaços, parênteses, traços e verifica se o telefone tem o formato esperado.
+    Acessa diretamente o chat do número no WhatsApp Web e aguarda o chat carregar.
+    
+    :param driver: Instância do WebDriver.
+    :param numero: Número de telefone do contato (formato internacional).
     """
-    telefone = str(telefone)
-    telefone = telefone.replace("(", "").replace(")", "").replace("-", "").replace(" ", "")
-    if not telefone.startswith("55"):  # Adicione o código do país se necessário
-        telefone = f"55{telefone}"
-    return telefone
+    link = f"https://web.whatsapp.com/send?phone={numero}"  # Link direto para o WhatsApp Web
+    driver.get(link)
+    time.sleep(10)  # Espera o WhatsApp Web carregar
+    
+    try:
+        # Espera o campo de mensagem ser carregado antes de enviar a mensagem
+        campo_mensagem = driver.find_element(By.XPATH, "//div[@contenteditable='true']")
+        campo_mensagem.click()  # Clica no campo de mensagem para garantir que o foco está lá
+        time.sleep(2)
+    except Exception as e:
+        print(f"Erro ao localizar o número {numero}: {e}")
 
 
-def enviar_mensagens(contatos, mensagem_template):
-    for contato in contatos:
-        nome = contato.get('nome', 'Desconhecido')
-        telefone = contato.get('telefone')
-        vencimento = contato.get('vencimento', 'Data de vencimento não especificada')
+def enviar_mensagem(driver, mensagem):
+    """
+    Envia uma mensagem para o contato no WhatsApp Web.
+    
+    :param driver: Instância do WebDriver.
+    :param mensagem: A mensagem a ser enviada.
+    """
+    try:
+        # Localiza o campo de mensagem (onde o texto é digitado)
+        campo_mensagem = driver.find_element(By.XPATH, "//div[@contenteditable='true']")
+        campo_mensagem.send_keys(mensagem)  # Digita a mensagem
+        time.sleep(2)  # Pausa para garantir que a mensagem foi digitada corretamente
+        
+        # Localiza o botão de enviar e clica nele
+        botao_enviar = driver.find_element(By.XPATH, "//button[@data-testid='send']")
+        botao_enviar.click()  # Envia a mensagem
+        time.sleep(2)  # Pausa após o envio da mensagem
+    except Exception as e:
+        print(f"Erro ao enviar a mensagem: {e}")
 
-        # Validar telefone
-        if not telefone or telefone == 'None':
-            print(f"Erro: Telefone inválido para {nome}. Pulando este contato.")
-            continue
+# Função principal para executar a automação
+def main():
+    # Caminho da planilha e do ChromeDriver
+    caminho_planilha = 'contatos.xlsx'
+    caminho_driver = r'drivers\chromedriver.exe'
 
-        telefone_formatado = formatar_telefone(telefone)
+    # Carregar os dados da planilha
+    dados = carregar_planilha(caminho_planilha, "Planilha1")  # Corrigido para 'caminho_planilha'
+    if dados is None:
+        return
 
-        # Gerar mensagem personalizada
-        mensagem = mensagem_template.format(nome=nome, vencimento=vencimento)
+    # Inicializar o WebDriver
+    driver = iniciar_webdriver(caminho_driver)
 
-        # Gerar link do WhatsApp
-        url = f"https://web.whatsapp.com/send?phone={telefone_formatado}&text={quote(mensagem)}"
-        print(f"Abrindo link: {url}")
+    # Logar no WhatsApp Web
+    logar_whatsapp(driver)
 
-        try:
-            webbrowser.open(url)
-            print(f"Mensagem gerada para {nome} ({telefone_formatado}).")
-            time.sleep(10)  # Aguarde para evitar problemas com múltiplas aberturas
-        except Exception as e:
-            print(f"Erro ao abrir link para {nome} ({telefone_formatado}): {e}")
+    # Iterar pelos contatos e enviar mensagens
+    for _, linha in dados.iterrows():
+        numero = linha['Telefone']
+        mensagem = f"Olá {linha['Nome']}, sua mensagem personalizada aqui!"  # Ajuste conforme necessário
+        localizar_contato(driver, numero)
+        enviar_mensagem(driver, mensagem)
 
-"""
-Main
-"""
+    # Finalizar WebDriver
+    driver.quit()
+
+# Executar o programa
 if __name__ == "__main__":
-    # Informações fixas para facilitar o teste
-    caminho_do_arquivo = "contatos.xlsx"
-    pagina = "Planilha1"
-    mensagem_template = "Olá {nome}, sua fatura vence em {vencimento}. Por favor, efetue o pagamento."
-
-    # Carregar contatos e enviar mensagens
-    contatos = carregar_planilha(caminho_do_arquivo, pagina)
-    enviar_mensagens(contatos, mensagem_template)
+    main()
